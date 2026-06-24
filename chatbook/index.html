@@ -1,0 +1,949 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Book - Chat Archive Viewer</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+    <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@100..900&family=Newsreader:ital,opsz,wght@0,6..72,200..800;1,6..72,200..800&family=Nanum+Myeongjo:wght@400;700;800&display=swap">
+    <link rel="stylesheet"
+        href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css">
+    <link rel="stylesheet" href="style.css">
+    <script>
+        // Apply the saved sidebar state BEFORE first paint (no animation).
+        // Only trust explicit `settings.sidebarCollapsed` to avoid accidental collapse.
+        (function () {
+            var root = document.documentElement;
+            root.classList.add('sidebar-collapsed-init'); // transition suppression only
+            try {
+                var debugSidebarInit = /[?&]debugSidebarInit=1(?:&|$)/.test(location.search);
+                if (debugSidebarInit) {
+                    window.__sidebarInitDebug = { enabled: true };
+                }
+
+                var stored = localStorage.getItem('chatArchiveSettings');
+                if (debugSidebarInit) {
+                    try { window.__sidebarInitDebug.rawSettings = stored; } catch (e) { }
+                    try { window.__sidebarInitDebug.hasData = localStorage.getItem('cav:hasData'); } catch (e) { }
+                }
+                if (!stored) {
+                    if (debugSidebarInit) window.__sidebarInitDebug.reason = 'no-settings';
+                    return;
+                }
+                var settings = JSON.parse(stored);
+                if (settings && settings.sidebarCollapsed === true) {
+                    root.classList.add('sidebar-collapsed-prepaint');
+                    if (debugSidebarInit) window.__sidebarInitDebug.reason = 'explicit-collapsed';
+                } else if (debugSidebarInit) {
+                    window.__sidebarInitDebug.reason = 'not-explicit-collapsed';
+                }
+            } catch (e) {
+                // Keep init class only; no forced collapse on error.
+                try {
+                    if (window.__sidebarInitDebug && window.__sidebarInitDebug.enabled) {
+                        window.__sidebarInitDebug.reason = 'error';
+                    }
+                } catch (e2) { }
+            }
+        })();
+    </script>
+    <script>
+        // Apply the last view BEFORE first paint to avoid view/layout switching flash.
+        // Mirrors script.js applyLastView() defaults (localStorage only; safe try/catch).
+        (function () {
+            try {
+                var root = document.documentElement;
+                var VIEW_KEY = 'cav:lastView';
+                var HAS_DATA_KEY = 'cav:hasData';
+                var lastView = null;
+                var hasData = false;
+                try { lastView = localStorage.getItem(VIEW_KEY); } catch (e) { }
+                try { hasData = localStorage.getItem(HAS_DATA_KEY) === 'true'; } catch (e) { }
+
+                var isStoredView = (lastView === 'dashboard' || lastView === 'mypage' || lastView === 'settings');
+                var defaultView = (hasData || isStoredView) ? 'dashboard' : 'history';
+                var view = lastView || defaultView;
+                if (view !== 'dashboard' && view !== 'mypage' && view !== 'settings' && view !== 'history') {
+                    view = defaultView;
+                }
+                root.classList.add('view-' + view + '-prepaint');
+            } catch (e) { }
+        })();
+    </script>
+    <script>
+        // Decide UI language BEFORE first paint to avoid language flash.
+        // Precedence: URL (?lang=ko|en) > localStorage > browser language.
+        (function () {
+            var root = document.documentElement;
+            var normalize = function (value) {
+                var v = String(value || '').toLowerCase();
+                if (v === 'ko' || v.indexOf('ko') === 0) return 'ko';
+                if (v === 'en' || v.indexOf('en') === 0) return 'en';
+                return null;
+            };
+
+            var getLangFromUrl = function () {
+                try {
+                    var params = new URLSearchParams(location.search || '');
+                    return normalize(params.get('lang'));
+                } catch (e) {
+                    return null;
+                }
+            };
+
+            var lang = getLangFromUrl();
+            if (!lang) {
+                try {
+                    lang = normalize(localStorage.getItem('chatbook-language'));
+                } catch (e) { }
+            }
+            if (!lang) {
+                try {
+                    var browserLang = navigator.language || navigator.userLanguage;
+                    lang = (browserLang && String(browserLang).toLowerCase().indexOf('ko') !== -1) ? 'ko' : 'en';
+                } catch (e) {
+                    lang = 'en';
+                }
+            }
+
+            root.lang = lang;
+            root.classList.add('lang-' + lang);
+            window.__chatbookPrepaintLanguage = lang;
+
+            // Only hide when we'd otherwise flash English (the default HTML) before i18n applies.
+            if (lang !== 'en') {
+                root.classList.add('i18n-pending');
+            }
+
+            // Safety valve: never keep the app invisible forever if i18n fails to load.
+            setTimeout(function () {
+                root.classList.remove('i18n-pending');
+            }, 1500);
+        })();
+    </script>
+    <script type="text/javascript">
+        (function (c, l, a, r, i, t, y) {
+            c[a] = c[a] || function () { (c[a].q = c[a].q || []).push(arguments) };
+            t = l.createElement(r); t.async = 1; t.src = "https://www.clarity.ms/tag/" + i;
+            y = l.getElementsByTagName(r)[0]; y.parentNode.insertBefore(t, y);
+        })(window, document, "clarity", "script", "v84byzpmm7");
+    </script>
+</head>
+
+<body class="booting">
+
+    <!-- Top Right Controls (language selector removed) -->
+
+    <!-- Main Dashboard (initially hidden) -->
+    <div id="dashboard" class="dashboard">
+        <aside class="sidebar">
+
+            <div class="sidebar-header">
+                <div class="header-top">
+                    <h2 id="chats-title" class="clickable-title"><img src="logo/wordmark.png" alt="Chatbook"
+                            class="sidebar-logo"></h2>
+                    <div class="header-icons">
+                        <button id="dashboard-btn" class="icon-btn" title="Dashboard">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <line x1="12" y1="20" x2="12" y2="10"></line>
+                                <line x1="18" y1="20" x2="18" y2="4"></line>
+                                <line x1="6" y1="20" x2="6" y2="14"></line>
+                            </svg>
+                        </button>
+                        <button id="mypage-btn" class="icon-btn" title="My Page">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <circle cx="12" cy="8" r="3.5"></circle>
+                                <path d="M4.5 20c1.8-3.5 5-5.5 7.5-5.5s5.7 2 7.5 5.5"></path>
+                            </svg>
+                        </button>
+                        <button id="sidebar-collapse-toggle" class="icon-btn sidebar-collapse-toggle"
+                            title="Collapse Sidebar">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <path d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+                <input type="text" id="search-input" placeholder="Search conversations..." />
+                <div class="filter-inline">
+                    <div class="filter-quick">
+                        <button type="button" class="quick-btn" data-mode="all">All</button>
+                        <button type="button" class="quick-btn" data-mode="week">1 Week</button>
+                        <button type="button" class="quick-btn" data-mode="month">1 Month</button>
+                        <button type="button" id="sidebar-filter-reset"
+                            class="quick-btn filter-reset-btn">Reset</button>
+                    </div>
+                    <div class="filter-sort-row">
+                        <span class="sort-label">Sort</span>
+                        <select id="chat-sort-select" class="chat-sort-select">
+                            <option value="newest">Newest first</option>
+                            <option value="oldest">Oldest first</option>
+                            <option value="active">Recent activity</option>
+                        </select>
+                    </div>
+                    <div class="filter-range">
+                        <input type="date" id="sidebar-filter-start" />
+                        <span class="divider">~</span>
+                        <input type="date" id="sidebar-filter-end" />
+                    </div>
+                    <input type="checkbox" id="sidebar-filter-by-date" class="hidden" />
+                </div>
+            </div>
+            <ul id="chat-list" class="chat-list">
+                <!-- List items will be added here -->
+            </ul>
+        </aside>
+
+        <main class="main-content">
+            <div id="fixed-history-header" class="history-fixed-header hidden">
+                <div class="history-header-grid history-header-primary">
+                    <div class="history-nav-btn left" role="button" tabindex="0" aria-label="Previous chat"
+                        data-direction="prev">←</div>
+                    <div id="fixed-page-title" class="history-title history-title-primary">Conversation History</div>
+                    <div class="history-nav-btn right" role="button" tabindex="0" aria-label="Next chat"
+                        data-direction="next">→</div>
+                </div>
+            </div>
+            <div id="content-header" class="hidden history-header-container">
+                <div class="history-header-grid history-header-secondary">
+                    <div id="page-title" class="history-title history-title-secondary"></div>
+                </div>
+            </div>
+            <div id="history-search-stack" class="history-search-stack hidden">
+            <div id="history-nav-pill" class="history-nav-pill">
+                <button id="history-top-btn" class="history-pill-btn" type="button" aria-label="Back to top">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 6L5 13"></path>
+                        <path d="M12 6L19 13"></path>
+                    </svg>
+                </button>
+                <div class="history-pill-divider"></div>
+                <button id="history-bottom-btn" class="history-pill-btn" type="button" aria-label="Go to bottom">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M12 18L5 11"></path>
+                        <path d="M12 18L19 11"></path>
+                    </svg>
+                </button>
+            </div>
+                <div id="history-search-bar" class="history-search-bar hidden is-collapsed">
+                    <div class="history-search-bar-inner">
+                        <button id="history-search-toggle" class="history-search-toggle" type="button"
+                            aria-label="Open search">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <circle cx="11" cy="11" r="7" fill="none"></circle>
+                                <path d="M16.5 16.5L21 21" fill="none"></path>
+                            </svg>
+                            <span class="history-search-toggle-text">Search</span>
+                        </button>
+                        <div class="history-search-field">
+                            <input id="history-search-input" class="history-search-input" type="text"
+                                placeholder="Search in conversation..." />
+                        </div>
+                        <span id="history-search-count" class="history-search-count">0/0</span>
+                        <span class="history-search-divider" aria-hidden="true"></span>
+                        <div class="history-search-nav">
+                            <button id="history-search-prev" class="history-search-btn" type="button"
+                                aria-label="Previous result">↑</button>
+                            <button id="history-search-next" class="history-search-btn" type="button"
+                                aria-label="Next result">↓</button>
+                        </div>
+                        <button id="history-search-close" class="history-search-close" type="button"
+                            aria-label="Close search">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M6 6L18 18"></path>
+                                <path d="M18 6L6 18"></path>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div id="content-display" class="content-display fade-in" style="padding-top: 20px;">
+                <div id="empty-state" class="empty-state fade-in hidden"></div>
+                <div id="post-upload-placeholder" class="post-upload-placeholder hidden">
+                    <h1 class="placeholder-title"><img src="logo/wordmark.png" alt="Chatbook" class="main-logo"></h1>
+                    <p id="placeholder-message" class="placeholder-text">The ultimate environment to conveniently view,
+                        search, and manage your ChatGPT conversation history.</p>
+                    <div class="action-dashboard-grid">
+                        <div class="action-card upload-card grid-upload upload-dropzone">
+                            <div id="upload-intro" class="upload-intro">
+                                <div class="upload-intro-top">
+                                    <div class="upload-status-info">
+                                        <div class="action-card-header">
+                                            <h3 class="upload-status-title">Chat Archive Viewer</h3>
+                                        </div>
+                                    </div>
+                                    <div class="upload-actions">
+                                        <button id="visible-upload-btn" class="upload-text-btn" type="button">
+                                            <span class="btn-text">파일 추가하기</span>
+                                            <div class="plus-circle">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                    stroke-width="2" stroke-linecap="square">
+                                                    <line x1="12" y1="7" x2="12" y2="17"></line>
+                                                    <line x1="7" y1="12" x2="17" y2="12"></line>
+                                                </svg>
+                                            </div>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="upload-dropdown-area" class="upload-dropdown-area hidden-height">
+                                    <div class="upload-drop-box" id="new-drop-zone">
+                                        <p class="drop-box-title">파일 첨부하기</p>
+                                        <p class="drop-box-desc">아무곳에나 사진을 끌어다 놓으세요.</p>
+                                    </div>
+                                    <div class="upload-dropdown-footer">
+                                        <span class="footer-label">내 컴퓨터에서</span>
+                                        <button id="manual-file-select-btn" class="file-select-btn">파일 선택</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="upload-status" class="upload-status hidden">
+                                <div class="upload-status-top">
+                                    <div class="upload-status-info">
+                                        <div class="action-card-header">
+                                            <h3 class="upload-status-title">Chat File Management</h3>
+                                        </div>
+                                    </div>
+                                    <div class="upload-actions">
+                                        <button id="dashboard-upload-btn" class="upload-text-btn" type="button">
+                                            <span class="btn-text">열기</span>
+                                            <div class="plus-circle toggle-icon">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                    stroke-width="2" stroke-linecap="square">
+                                                    <line x1="12" y1="7" x2="12" y2="17"></line>
+                                                    <line x1="7" y1="12" x2="17" y2="12"></line>
+                                                </svg>
+                                            </div>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="status-upload-dropdown-area" class="upload-dropdown-area hidden-height">
+                                    <div class="upload-drop-box status-info-box">
+                                        <div class="status-row">
+                                            <span class="status-label">Status</span>
+                                            <span id="dashboard-upload-summary" class="status-value">Upload
+                                                complete</span>
+                                        </div>
+                                        <div class="status-row">
+                                            <span class="status-label">Filename</span>
+                                            <span id="dashboard-file-name" class="status-value">-</span>
+                                        </div>
+                                    </div>
+                                    <div class="upload-dropdown-footer status-footer">
+                                        <button id="status-replace-btn" class="file-select-btn">파일 교체</button>
+                                        <button id="status-remove-btn" class="danger-btn-simple">파일 제거</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="action-card brand-card clickable-row">
+                            <div class="action-card-header">
+                                <div class="brand-header-main">
+                                    <h3 id="brand-header" class="upload-status-title">사용방법</h3>
+                                </div>
+                                <div class="brand-toggle-actions">
+                                    <span id="brand-toggle-text" class="brand-toggle-text">열기</span>
+                                    <div class="row-icon-circle toggle-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                            <path d="M6 9l6 6 6-6"></path>
+                                        </svg>
+                                    </div>
+                                </div>
+                            </div>
+                            <div id="brand-expanded-content" class="brand-content-area">
+                                <p class="help-text instruction-1">chat.html 또는 conversations.json 파일을 업로드하세요.</p>
+                                <p class="help-text instruction-2">파일을 이 영역에 드래그 앤 드롭해도 업로드됩니다.</p>
+                            </div>
+                        </div>
+                        <div id="dashboard-view-card" class="action-card brand-card clickable-row-simple">
+                            <div class="action-card-header">
+                                <h3 class="upload-status-title">Dashboard</h3>
+                                <div class="row-icon-circle">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <path d="M5 12h14"></path>
+                                        <path d="M12 5l7 7-7 7"></path>
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="dashboard-mypage-card" class="action-card brand-card clickable-row-simple">
+                            <div class="action-card-header">
+                                <h3 class="upload-status-title">My Page</h3>
+                                <div class="row-icon-circle">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                        <path d="M5 12h14"></path>
+                                        <path d="M12 5l7 7-7 7"></path>
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="dashboard-settings-card" class="action-card brand-card clickable-row-simple">
+                            <div class="action-card-header">
+                                <h3 class="upload-status-title">Settings</h3>
+                                <div class="row-icon-circle">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <circle cx="12" cy="12" r="3"></circle>
+                                        <path
+                                            d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c0 .66.39 1.26 1 1.51.28.11.59.17.91.17h.09a2 2 0 1 1 0 4h-.09c-.32 0-.63.06-.91.17-.61.25-1 .85-1 1.51z">
+                                        </path>
+                                    </svg>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="chat-content"></div>
+            </div>
+
+            <!-- Dashboard (Statistics & Analytics) -->
+            <div id="dashboard-view" class="content-display hidden">
+                <h2 class="page-section-title">Dashboard</h2>
+                <div id="analysis-bar-host-dashboard" class="analysis-bar-host">
+                    <div id="analysis-bar" class="analysis-bar hidden" aria-label="Analysis period">
+                        <span id="analysis-bar-title" class="analysis-bar-title">Analysis Period</span>
+                        <select id="analysis-preset" class="analysis-select" aria-label="Analysis preset">
+                            <option value="all">All Time (전체)</option>
+                            <option value="monthly">📅 월별 분석 (Monthly)</option>
+                            <option value="7d">Last 7 Days</option>
+                            <option value="30d">Last 30 Days</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        <div id="analysis-monthly-nav" class="analysis-monthly-nav" style="display: none;">
+                            <button id="analysis-month-prev" class="analysis-nav-btn" type="button" aria-label="Previous month">←</button>
+                            <span id="analysis-month-display" class="analysis-month-display">2026.05</span>
+                            <button id="analysis-month-next" class="analysis-nav-btn" type="button" aria-label="Next month">→</button>
+                        </div>
+                        <div class="analysis-range">
+                            <input type="date" id="analysis-start" class="analysis-date"
+                                aria-label="Analysis start date" />
+                            <span class="divider">~</span>
+                            <input type="date" id="analysis-end" class="analysis-date" aria-label="Analysis end date" />
+                        </div>
+                        <button id="analysis-clear" class="text-btn analysis-btn" type="button">Reset</button>
+                    </div>
+                </div>
+                <div class="dashboard-top">
+                    <div class="stats-grid">
+                        <div class="stat-card dashboard-row-card">
+                            <div class="dashboard-row-header">
+                                <h3>Total Conversations</h3>
+                            </div>
+                            <p id="stat-total-chats">0</p>
+                        </div>
+                        <div class="stat-card dashboard-row-card">
+                            <div class="dashboard-row-header">
+                                <h3>Recent Activity</h3>
+                            </div>
+                            <p id="stat-freshness">-</p>
+                        </div>
+                        <div class="stat-card dashboard-row-card">
+                            <div class="dashboard-row-header">
+                                <h3>Active Days</h3>
+                            </div>
+                            <p id="stat-active-days">-</p>
+                        </div>
+                    </div>
+                    <div class="dashboard-top-right">
+                        <div id="dashboard-hourly-card" class="chart-card chart-right">
+                            <div class="dashboard-row-header">
+                                <h3>Activity by Hour</h3>
+                            </div>
+                            <p class="chart-peak"><span id="radar-peak-hour" class="peak-hour">--</span><span> is your
+                                    most
+                                    active hour.</span></p>
+                            <div class="chart-visual">
+                                <div id="radar-chart" class="radar-chart"></div>
+                                <div id="radar-empty" class="chart-empty hidden">No data available to display.</div>
+                            </div>
+                            <p class="chart-note">Message count by hour for the selected period.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="dashboard-charts-wide">
+                    <div id="dashboard-daily-card" class="chart-card chart-wide">
+                        <div class="dashboard-row-header">
+                            <h3>Daily Activity</h3>
+                        </div>
+                        <p class="chart-peak"><span id="daily-peak-date" class="peak-hour">--</span><span> is your most
+                                active day.</span></p>
+                        <div class="chart-visual">
+                            <div id="heatmap-chart" class="heatmap-grid"></div>
+                            <div id="heatmap-empty" class="chart-empty hidden">No data available to display.</div>
+                        </div>
+                        <p class="chart-note">Shows daily message count for the recent period.</p>
+                    </div>
+                    <div id="dashboard-monthly-card" class="chart-card monthly-card chart-left">
+                        <div class="dashboard-row-header">
+                            <h3>Monthly Activity</h3>
+                        </div>
+                        <p class="chart-peak"><span id="monthly-peak-month" class="peak-hour">--</span><span> is your
+                                most
+                                active month.</span></p>
+                        <div class="chart-visual">
+                            <div id="area-chart" class="chart-area"></div>
+                            <div class="chart-axis hidden" id="month-axis"></div>
+                            <div class="chart-axis year-axis hidden" id="year-axis"></div>
+                            <div id="area-empty" class="chart-empty hidden">No data available to display.</div>
+                        </div>
+                        <p class="chart-note">Total message count by month.</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- My Page (Personal Insights) -->
+            <div id="mypage-view" class="content-display hidden">
+                <h2 class="page-section-title">My Page</h2>
+                <div id="analysis-bar-host-mypage" class="analysis-bar-host"></div>
+                <div class="charts-section">
+                    <div class="chart-row">
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>Recent Keywords</h3>
+                            </div>
+                            <p id="keyword-recent-summary" class="chart-peak">--</p>
+                            <p class="chart-note">Top 3 noun keywords for the selected period.</p>
+                        </div>
+                        <div class="chart-card">
+                            <h3>Interest Map</h3>
+                            <div id="topic-map" class="topic-map"></div>
+                            <div id="topic-empty" class="chart-empty hidden">Unable to display interest data.</div>
+                        </div>
+                    </div>
+                    <div class="chart-row">
+                        <div class="chart-card chart-span-2">
+                            <div class="chart-header">
+                                <h3>Frequently Used Keywords</h3>
+                                <div class="keyword-controls">
+                                    <span class="keyword-label">Speaker</span>
+                                    <select id="keyword-mode">
+                                        <option value="all">Combined</option>
+                                        <option value="user">User</option>
+                                        <option value="assistant">ChatGPT</option>
+                                    </select>
+                                    <span class="keyword-label">Language</span>
+                                    <select id="keyword-language">
+                                        <option value="all">All</option>
+                                        <option value="ko">Korean</option>
+                                        <option value="en">English</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="chart-visual">
+                                <div id="keyword-chart" class="keyword-list"></div>
+                                <div id="keyword-empty" class="chart-empty hidden">Insufficient keywords.</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-row chart-row-3">
+                        <div class="chart-card">
+                            <h3>Conversation Style</h3>
+                            <p class="chart-peak"><span class="chart-peak-text">My Approach to AI</span><br><span
+                                    id="attitude-summary" class="peak-hour">--</span></p>
+                            <div class="chart-visual">
+                                <div id="attitude-chart" class="type-list">
+                                    <div class="type-row">
+                                        <span class="type-label">Task-Oriented</span>
+                                        <div class="type-bar">
+                                            <div id="attitude-assistant" class="type-bar-fill helper"
+                                                style="width: 33%;"></div>
+                                        </div>
+                                        <span class="type-count"><span id="attitude-assistant-pct">--</span>%</span>
+                                    </div>
+                                    <div class="type-row">
+                                        <span class="type-label">Conversational</span>
+                                        <div class="type-bar">
+                                            <div id="attitude-debate" class="type-bar-fill debate" style="width: 33%;">
+                                            </div>
+                                        </div>
+                                        <span class="type-count"><span id="attitude-debate-pct">--</span>%</span>
+                                    </div>
+                                    <div class="type-row">
+                                        <span class="type-label">Expressive</span>
+                                        <div class="type-bar">
+                                            <div id="attitude-emotional" class="type-bar-fill emotional"
+                                                style="width: 33%;">
+                                            </div>
+                                        </div>
+                                        <span class="type-count"><span id="attitude-emotional-pct">--</span>%</span>
+                                    </div>
+                                </div>
+                                <div id="attitude-empty" class="chart-empty hidden">Insufficient data to analyze
+                                    conversation style.</div>
+                            </div>
+                            <p class="chart-note">Analyzes style based on sentence endings and keywords.</p>
+                        </div>
+                        <div class="chart-card">
+                            <h3>Focus Style</h3>
+                            <p class="chart-peak">
+                                <span id="focus-style-label" class="peak-style">--</span>
+                            </p>
+                            <p class="chart-note" id="focus-style-note">Based on your productivity peak hour.</p>
+                        </div>
+                        <div class="chart-card">
+                            <h3>Peak Productivity Hours</h3>
+                            <p class="chart-peak">
+                                <span id="peak-time-hour" class="peak-hour">--</span><span class="chart-peak-text"> is
+                                    when I'm most productive.</span>
+                            </p>
+                            <div class="chart-visual">
+                                <div id="peak-time-chart" class="peaktime-chart"></div>
+                                <div id="peak-time-axis" class="peaktime-axis"></div>
+                                <div id="peak-time-empty" class="chart-empty hidden">Insufficient productivity data.
+                                </div>
+                            </div>
+                            <p class="chart-note">Density metric combining word count and complexity by hour.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+
+            <!-- Settings Page (File & Account Management) -->
+            <div id="settings-view" class="content-display hidden">
+                <h2 class="page-section-title">Settings</h2>
+                <div id="settings-archive-metadata" class="settings-section">
+                    <div class="settings-section-header">
+                        <h3>Archive Metadata</h3>
+                    </div>
+                    <div class="settings-section-body">
+                        <div class="settings-box">
+                            <div class="settings-list">
+                                <div class="settings-item">
+                                    <span class="label">Current File</span>
+                                    <span id="mypage-filename" class="value">-</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Original File Size</span>
+                                    <span id="mypage-filesize" class="value">-</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Conversation Threads</span>
+                                    <span id="mypage-total-chats" class="value">0</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Total Messages</span>
+                                    <span id="mypage-total-messages" class="value">-</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Approximate Characters</span>
+                                    <span id="mypage-total-chars" class="value">-</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Last Loaded</span>
+                                    <span id="mypage-last-loaded" class="value">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settings-retention" class="settings-section">
+                    <div class="settings-section-header">
+                        <h3>Local Storage & Privacy</h3>
+                    </div>
+                    <div class="settings-section-body">
+                        <div class="settings-box">
+                            <div class="settings-list">
+                                <label class="settings-item toggle-item">
+                                    <span id="label-persist-local" class="label">Remember uploads on this device</span>
+                                    <input type="checkbox" id="persist-local" />
+                                </label>
+                                <label class="settings-item toggle-item">
+                                    <span id="label-privacy-mode" class="label">Privacy mode (do not store; delete on
+                                        close)</span>
+                                    <input type="checkbox" id="privacy-mode" />
+                                </label>
+                                <label class="settings-item toggle-item">
+                                    <span id="label-auto-expire" class="label">Auto-delete saved data after 7
+                                        days</span>
+                                    <input type="checkbox" id="auto-expire" />
+                                </label>
+                                <div class="settings-item">
+                                    <span id="label-local-storage-status" class="label">Local Storage Status</span>
+                                    <span id="local-storage-status" class="value">-</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span id="label-auto-delete-date" class="label">Auto-delete Date</span>
+                                    <span id="auto-delete-date" class="value">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settings-file-backup" class="settings-section">
+                    <div class="settings-section-header">
+                        <h3>File Management & Backup</h3>
+                    </div>
+                    <div class="settings-section-body">
+                        <div class="settings-box">
+                            <div class="settings-list">
+                                <div class="settings-item">
+                                    <span id="label-load-archive" class="label">Load New Archive</span>
+                                    <button id="replace-file-btn" class="primary-btn">Load New Archive</button>
+                                </div>
+                                <div class="settings-item">
+                                    <span id="label-export-backup" class="label">Export Backup</span>
+                                    <button id="export-backup-btn" class="secondary-btn">Export Backup</button>
+                                </div>
+                                <div class="settings-item">
+                                    <span id="label-import-backup" class="label">Import Backup</span>
+                                    <button id="import-backup-btn" class="secondary-btn">Import Backup</button>
+                                </div>
+                                <div class="settings-item">
+                                    <span id="label-clear-data" class="label">Clear Local Data</span>
+                                    <button id="clear-data-btn" class="danger-btn">Clear Local Data</button>
+                                </div>
+                            </div>
+                            <p id="retention-note" class="settings-note">Applies to data saved locally in your browser
+                                (IndexedDB). Cleanup runs only
+                                when the app is opened; use “Clear Local Data” to delete immediately.</p>
+                            <input type="file" id="backup-input" accept=".json" class="hidden" />
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settings-language" class="settings-section">
+                    <div class="settings-section-header">
+                        <h3>Language</h3>
+                    </div>
+                    <div class="settings-section-body">
+                        <div class="settings-box">
+                            <div class="settings-list">
+                                <label class="settings-item">
+                                    <span id="label-interface-language" class="label">Interface Language</span>
+                                    <select id="language-setting-select" class="token-rate-select">
+                                        <option value="en">English</option>
+                                        <option value="ko">한국어</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settings-estimated-cost" class="settings-section is-collapsed">
+                    <div class="settings-section-header">
+                        <h3>Estimated Cost for This Chat File</h3>
+                        <button id="settings-estimated-cost-toggle" class="icon-btn settings-section-toggle"
+                            type="button" aria-label="Toggle estimated cost" aria-expanded="false">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2" aria-hidden="true">
+                                <polyline points="6 9 12 15 18 9"></polyline>
+                            </svg>
+                        </button>
+                    </div>
+                    <div id="settings-estimated-cost-body" class="settings-section-body">
+                        <div class="settings-box">
+                            <div class="settings-list">
+                                <div class="settings-item">
+                                    <span class="label">Total Estimated Tokens</span>
+                                    <span id="mypage-estimated-tokens" class="value">-</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Estimated Input Tokens (User)</span>
+                                    <span id="mypage-estimated-input-tokens" class="value">-</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Estimated Output Tokens (Assistant)</span>
+                                    <span id="mypage-estimated-output-tokens" class="value">-</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Total Estimated Cost</span>
+                                    <span id="mypage-estimated-cost" class="value">-</span>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Model Preset</span>
+                                    <select id="pricing-model-select" class="token-rate-select">
+                                        <option value="gpt-4o-mini">GPT-4o mini</option>
+                                        <option value="gpt-4o">GPT-4o</option>
+                                        <option value="gpt-4.1-mini">GPT-4.1 mini</option>
+                                        <option value="gpt-4.1">GPT-4.1</option>
+                                        <option value="gpt-4.1-nano">GPT-4.1 nano</option>
+                                        <option value="custom">Custom</option>
+                                    </select>
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Input Rate (USD, per 1M tokens)</span>
+                                    <input type="number" id="input-rate-usd-input" class="token-rate-input" min="0"
+                                        step="0.01" placeholder="e.g., 0.15" />
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">Output Rate (USD, per 1M tokens)</span>
+                                    <input type="number" id="output-rate-usd-input" class="token-rate-input" min="0"
+                                        step="0.01" placeholder="e.g., 0.60" />
+                                </div>
+                                <div class="settings-item">
+                                    <span class="label">FX Rate (KRW per 1 USD, optional)</span>
+                                    <input type="number" id="fx-krw-per-usd-input" class="token-rate-input" min="0"
+                                        step="0.01" placeholder="e.g., 1350" />
+                                </div>
+                            </div>
+                            <p class="settings-note">Estimates are approximate. Tokenization and API billing may differ
+                                from
+                                this
+                                viewer’s heuristic; system prompts, tool calls, caching, and retries are not included.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="settings-security" class="settings-section">
+                    <div class="settings-section-header">
+                        <h3>Local Processing & Security Principles</h3>
+                    </div>
+                    <div class="settings-section-body">
+                        <p id="security-principles-text" class="settings-text">Chat files are read and analyzed locally
+                            in
+                            your browser. If “Remember
+                            uploads” is enabled, parsed data is stored locally (IndexedDB) to restore on refresh. This
+                            viewer
+                            does not intentionally upload chat content, but your deployment may load external scripts
+                            (e.g.,
+                            analytics) depending on your HTML setup.
+                        </p>
+                        <div id="security-rules" class="security-rules"></div>
+                    </div>
+                </div>
+
+                <div id="settings-system" class="settings-section">
+                    <div class="settings-section-header">
+                        <h3>System Information</h3>
+                    </div>
+                    <div class="settings-section-body">
+                        <div class="settings-list">
+                            <div class="settings-item">
+                                <span class="label">Version</span>
+                                <span class="value">v1.2.0</span>
+                            </div>
+                            <div class="settings-item">
+                                <span class="label">Developer</span>
+                                <span class="value">Rebuilders</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="site-footer">
+                <p class="footer-text">© 2026. Rebuilders. all rights reserved.</p>
+            </div>
+        </main>
+    </div>
+
+    <!-- Parsing Options Modal -->
+    <div id="parsing-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>File Structure Analysis Settings</h2>
+            <p class="modal-desc">The file has been loaded but its content structure is unclear.<br>Please select one of
+                the options below.</p>
+
+            <div class="preview-box">
+                <h4>File Preview (First 500 characters)</h4>
+                <div id="file-preview-text" class="code-block"></div>
+                <p id="encoding-warning" class="warning-text hidden">⚠️ Is the text garbled? Try changing the encoding.
+                </p>
+            </div>
+
+            <div class="option-group">
+                <label>Document Encoding</label>
+                <select id="encoding-select">
+                    <option value="UTF-8">UTF-8 (Default)</option>
+                    <option value="EUC-KR">EUC-KR (Legacy Korean Windows files)</option>
+                </select>
+                <button id="reload-file-btn" class="secondary-btn">Reload with this encoding</button>
+            </div>
+
+            <div class="option-group">
+                <label>Conversation Separator (Selector)</label>
+                <div class="radio-group">
+                    <label class="radio-label">
+                        <input type="radio" name="split-strategy" value="auto" checked>
+                        Auto-detect
+                    </label>
+                    <label class="radio-label">
+                        <input type="radio" name="split-strategy" value="selector">
+                        Enter CSS selector manually
+                    </label>
+                </div>
+                <input type="text" id="custom-selector" class="input-field hidden" placeholder="e.g., .message or h3">
+
+                <!-- Suggested selectors area -->
+                <div id="suggested-selectors-container" class="hidden" style="margin-top: 0.5rem;">
+                    <p class="hint-text" style="font-weight:600; color:#444; margin-bottom:4px;">💡 Detected candidates
+                        (click to
+                        apply):</p>
+                    <div id="suggested-tags" style="display:flex; flex-wrap:wrap; gap:0.5rem;"></div>
+                </div>
+
+                <p class="hint-text">Tip: For &lt;div class="msg"&gt;, enter <b>.msg</b>.</p>
+            </div>
+
+            <div class="modal-actions">
+                <button id="apply-parsing-btn" class="primary-btn">Apply</button>
+                <button id="cancel-modal-btn" class="text-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Clear Data Modal -->
+    <div id="clear-data-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="clear-data-title">
+        <div class="modal-content">
+            <h2 id="clear-data-title">Clear Local Data</h2>
+            <p id="clear-data-desc" class="modal-desc">This will delete locally stored chat data from this browser on
+                this
+                device.</p>
+            <div id="clear-data-checklist" class="clear-data-checklist">
+                <h4 id="clear-data-checklist-title">What will be deleted</h4>
+                <ul>
+                    <li id="clear-data-item-1">Saved session in IndexedDB (ChatArchiveDB)</li>
+                    <li id="clear-data-item-2">In-memory loaded chat data in this tab</li>
+                    <li id="clear-data-item-3">Data restore flag (so refresh won’t restore)</li>
+                </ul>
+                <label class="settings-item toggle-item clear-data-reset-toggle">
+                    <span id="clear-data-reset-label" class="label">Also reset preferences (optional)</span>
+                    <input type="checkbox" id="clear-data-reset-prefs" />
+                </label>
+                <p id="clear-data-reset-note" class="hint-text">Resets stored settings (filters, pricing, privacy
+                    toggles)
+                    and language preference.</p>
+            </div>
+            <div class="modal-actions">
+                <button id="clear-data-confirm-btn" class="danger-btn">Delete</button>
+                <button id="clear-data-cancel-btn" class="secondary-btn">Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast hidden">Notification</div>
+    <div id="loading-screen" class="loading-screen hidden">
+        <div class="loading-card">
+            <div class="loading-spinner"></div>
+            <p>Loading...</p>
+        </div>
+    </div>
+
+    <input type="file" id="file-input" accept=".html,.json" class="hidden" multiple />
+
+    <!-- 모듈화된 스크립트 로드 (순서 중요) -->
+    <script src="modules/dataManager.js"></script>
+    <script src="modules/cacheManager.js"></script>
+    <script src="modules/fileHandler.js"></script>
+    <script src="modules/uiManager.js"></script>
+    <script src="modules/main.js"></script>
+    <!-- Language translation system -->
+    <script src="i18n.js"></script>
+    <!-- 기존 script.js는 마지막에 로드 (호환성) -->
+    <script src="script.js"></script>
+</body>
+
+</html>
